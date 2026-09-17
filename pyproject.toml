@@ -18,9 +18,5 @@ dependencies = [
     "torchvision>=0.29.0",
 ]
 
-
-
-
-
 [tool.uv]
 package=false
