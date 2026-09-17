@@ -2,7 +2,10 @@
 - pass
 
 ### Notes
-- pass
+- ~10% объектов в train, val и public с ошибочными метками
+- в ответе нужны вероятности в [0, 1], а не классы
+- row_id не фича
+- обязательно надо сравнить 3 модели: decision tree, random forest, gradient-boosting
 
 ### Questions
 - pass
