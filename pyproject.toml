@@ -1,0 +1,26 @@
+[project]
+name = "kaggle"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Platon U.", email = "revlze@yahoo.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "marimo>=0.24.2",
+    "numpy>=2.5.2",
+    "polars>=1.44.2",
+    "pyarrow>=25.0.1",
+    "scikit-learn>=1.9.0",
+    "seaborn>=0.13.2",
+    "torch>=2.14.0",
+    "torchvision>=0.29.0",
+]
+
+[project.scripts]
+kaggle = "kaggle:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
