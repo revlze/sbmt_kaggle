@@ -7,6 +7,7 @@
 - row_id не фича
 - обязательно надо сравнить 3 модели: decision tree, random forest, gradient-boosting
 - стандартизация, нормализация данных (?)
+- данные в train, test, val распределены одинково, как показал adversarial validation, roc auc score выдает ≈0.5 во всех vs
 
 ### Questions
 - pass
