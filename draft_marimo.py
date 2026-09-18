@@ -60,7 +60,7 @@ def _(
     X_train: pd.DataFrame = train_df[feature_columns]
     y_train: pd.Series = train_df['target']
 
-    X_validation: pd.DataFrame = val_df[feature_columns]
+    X_val: pd.DataFrame = val_df[feature_columns]
     y_val: pd.Series = val_df['target']
 
     X_test: pd.DataFrame = test_df[feature_columns]
