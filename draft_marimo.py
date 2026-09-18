@@ -9,9 +9,13 @@ def _():
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
+    from sklearn.model_selection import train_test_split
+    from sklearn.tree import DecisionTreeClassifier
+    from sklearn.metrics import roc_auc_score
     from pathlib import Path
-
-    return Path, pd
+    from utils import set_seed
+    set_seed()
+    return DecisionTreeClassifier, Path, pd, roc_auc_score, train_test_split
 
 
 @app.cell
@@ -64,6 +68,57 @@ def _(
     y_val: pd.Series = val_df['target']
 
     X_test: pd.DataFrame = test_df[feature_columns]
+    return X_test, X_train, X_val
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## adversarial validation
+    проверка насколько отличается test от train и остальные
+    """)
+    return
+
+
+@app.cell
+def _(
+    DecisionTreeClassifier,
+    X_test: "pd.DataFrame",
+    X_train: "pd.DataFrame",
+    pd,
+    roc_auc_score,
+    train_test_split,
+):
+    def adv_val(df1, df2, model):
+        X_train['is_test'] = 0
+        X_test['is_test'] = 1
+
+        adv_train_test = pd.concat([X_train, X_test])
+        adv_X = adv_train_test.drop(columns="is_test").to_numpy()
+        adv_y = adv_train_test["is_test"].to_numpy()
+
+        adv_X_tr, adv_X_val, adv_y_tr, adv_y_val = train_test_split(adv_X, adv_y, test_size=0.2, stratify=adv_y)
+        model.fit(adv_X_tr, adv_y_tr)
+
+        pred =  model.predict_proba(adv_X_val)[:,1]
+        score = roc_auc_score(adv_y_val, pred)
+        return score
+
+    model = DecisionTreeClassifier(max_depth=3, min_samples_split=20)
+    return adv_val, model
+
+
+@app.cell
+def _(
+    X_test: "pd.DataFrame",
+    X_train: "pd.DataFrame",
+    X_val: "pd.DataFrame",
+    adv_val,
+    model,
+):
+    print(f'train vs val', adv_val(X_train, X_val, model))
+    print(f'train vs test', adv_val(X_train, X_test, model))
+    print(f'test vs val', adv_val(X_test, X_val, model))
     return
 
 
