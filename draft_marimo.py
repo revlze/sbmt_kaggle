@@ -9,21 +9,23 @@ def _():
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
+    from sklearn.base import clone
     from sklearn.model_selection import train_test_split, StratifiedKFold
     from sklearn.tree import DecisionTreeClassifier
-    from sklearn.ensemble import GradientBoostingClassifier
+    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.metrics import roc_auc_score
     from pathlib import Path
     from utils import set_seed
-    from tqdm import tqdm
+    from tqdm.auto import tqdm
 
     SEED = 42
     set_seed(SEED)
     return (
-        GradientBoostingClassifier,
         Path,
+        RandomForestClassifier,
         SEED,
         StratifiedKFold,
+        clone,
         np,
         pd,
         roc_auc_score,
@@ -95,43 +97,59 @@ def _(mo):
 
 @app.cell
 def _(
-    GradientBoostingClassifier,
+    RandomForestClassifier,
     SEED,
     StratifiedKFold,
+    clone,
     np,
     pd,
     roc_auc_score,
     tqdm,
 ):
-    def adv_val(df1, df2, model):
-        df1 = df1.copy()
-        df2 = df2.copy()
+    def adv_val(df, test_df, model):
+        df1: pd.DataFrame = df.copy()
+        df2: pd.DataFrame = test_df.copy()
+
         df1['is_test'] = 0
         df2['is_test'] = 1
 
-        adv_dataset = pd.concat([
-                                df1.copy().assign(is_test=0),
-                                df2.copy().assign(is_test=1),
-                            ], ignore_index=True)
-        adv_X = adv_dataset.drop(columns="is_test").to_numpy()
-        adv_y = adv_dataset["is_test"].to_numpy()
+        adv_dataset: pd.DataFrame = pd.concat([df1, df2], ignore_index=True)
+        adv_X: pd.DataFrame = adv_dataset.drop(columns='is_test')
+        adv_y: pd.Series = adv_dataset['is_test']
 
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-        cv_loop = tqdm(cv.split(adv_X, adv_y), leave=False)
-        scores = []
-        for train_idx, val_idx in cv_loop:
-            fold_X_train, fold_y_train = adv_X[train_idx], adv_y[train_idx]
-            fold_X_val, fold_y_val = adv_X[val_idx], adv_y[val_idx]
-            model.fit(fold_X_train, fold_y_train)
-            pred =  model.predict_proba(fold_X_val)[:,1]
-            score = roc_auc_score(fold_y_val, pred)
-            scores.append(score)
-            cv_loop.set_description(f'roc_auc_score = {score}')
-        
-        return np.mean(scores), np.std(scores)
+        scores: list = []
+        feature_importances: np.ndarray = np.zeros(adv_X.shape[1])
 
-    model = GradientBoostingClassifier(n_estimators=200, learning_rate=0.05, max_depth=3,
-                                        min_samples_leaf=10, subsample=0.8, random_state=SEED)
+        for train_idx, val_idx in tqdm(cv.split(adv_X, adv_y), total=5, leave=False):
+            fold_X_train, fold_y_train = adv_X.iloc[train_idx], adv_y[train_idx]
+            fold_X_val, fold_y_val = adv_X.iloc[val_idx], adv_y[val_idx]
+
+            fold_model = clone(model)
+            fold_model.fit(fold_X_train, fold_y_train)
+
+            pred: np.ndarray = fold_model.predict_proba(fold_X_val)[:, 1]
+
+            score: float = roc_auc_score(fold_y_val, pred)
+            scores.append(score)
+
+            if hasattr(fold_model, 'feature_importances_'):
+                feature_importances += fold_model.feature_importances_ / cv.n_splits
+    
+        fi_series: pd.Series = (
+            pd.Series(
+                feature_importances, index=adv_X.columns
+            )
+            .sort_values(ascending=False)
+        )
+
+        return np.mean(scores), np.std(scores), scores, fi_series
+
+    model = RandomForestClassifier(
+        n_estimators=700, criterion='gini',
+        max_depth=7, min_samples_leaf=10,
+        random_state=SEED
+    )
     return adv_val, model
 
 
@@ -143,13 +161,21 @@ def _(
     adv_val,
     model,
 ):
-    train_vs_val = adv_val(X_train, X_val, model)
-    train_vs_test = adv_val(X_train, X_test, model)
-    test_vs_val = adv_val(X_test, X_val, model)
+    train_vs_val: tuple = adv_val(X_train, X_val, model)
+    train_vs_test: tuple = adv_val(X_train, X_test, model)
+    test_vs_val: tuple = adv_val(X_test, X_val, model)
 
     print(f'train vs val: {train_vs_val[0]} ± {train_vs_val[1]}')
     print(f'train vs test: {train_vs_test[0]} ± {train_vs_test[1]}')
     print(f'test vs val: {test_vs_val[0]} ± {test_vs_val[1]}')
+    return test_vs_val, train_vs_test, train_vs_val
+
+
+@app.cell
+def _(test_vs_val: tuple, train_vs_test: tuple, train_vs_val: tuple):
+    print(train_vs_val[2])
+    print(train_vs_test[2])
+    print(test_vs_val[2])
     return
 
 
