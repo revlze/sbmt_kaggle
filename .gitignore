@@ -3,5 +3,9 @@ data/
 uv.lock
 .python*
 .venv
+<<<<<<< HEAD
 __marimo__
 *.html
+=======
+*.html
+>>>>>>> feature/eda
