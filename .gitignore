@@ -5,3 +5,4 @@ uv.lock
 .venv
 __marimo__
 *.html
+__pycache__
