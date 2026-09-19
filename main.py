@@ -19,6 +19,7 @@ def _():
     from utils import set_seed
     from tqdm.auto import tqdm
     import time
+    import cleanlab
 
     SEED = 42
     set_seed(SEED)
@@ -30,6 +31,7 @@ def _():
         RandomizedSearchCV,
         SEED,
         StratifiedKFold,
+        cleanlab,
         clone,
         np,
         pd,
@@ -311,11 +313,11 @@ def _(
 def _(SEED, StratifiedKFold):
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
     param_grids = {
-        'GBDT': {
-            'n_estimators': [50, 100, 200, 300],
-            'learning_rate': [0.01, 0.03, 0.05, 0.1],
-            'max_depth': [2, 3, 4, 5, 7, 10],
-            'min_samples_leaf': [1, 5, 10, 20],
+        'Random Forest': {
+            'n_estimators': [100, 200, 300, 500],
+            'max_depth': [3, 5, 7, 10, None],
+            'min_samples_leaf': [1, 2, 5, 10],
+            'max_features': ['sqrt', 'log2', 0.5],
         },
     }
     return cv, param_grids
@@ -346,6 +348,32 @@ def _(preds_df_search):
 def _(metrics_df_search):
     metrics_df_search.to_clipboard(index=False)
     metrics_df_search
+    return
+
+
+@app.cell
+def _(
+    RandomForestClassifier,
+    SEED,
+    X_train: "pd.DataFrame",
+    X_val: "pd.DataFrame",
+    cleanlab,
+    clone,
+    roc_auc_score,
+    y_train: "pd.Series",
+    y_val: "pd.Series",
+):
+    model = RandomForestClassifier(n_estimators=200, max_depth=5, min_samples_split=50, min_samples_leaf=20, random_state=SEED, n_jobs=-1)
+    cl = cleanlab.classification.CleanLearning(model, seed=SEED, verbose=True)
+    cl.fit(X_train, y_train)
+    model = clone(model)
+    model.fit(X_train, y_train)
+
+    # issues = cl.get_label_issues()
+    # print(issues['is_label_issue'].sum())
+    print("Val AUC (cleaned):", roc_auc_score(y_val, cl.predict_proba(X_val)[:, 1]))
+    print('Val AUC (model):', roc_auc_score(y_val, model.predict_proba(X_val)[:, 1]))
+    print('model params:', model.get_params())
     return
 
 

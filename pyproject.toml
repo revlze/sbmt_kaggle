@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "cleanlab>=2.9.0",
     "marimo>=0.24.2",
     "numpy>=2.5.2",
     "polars>=1.44.2",
