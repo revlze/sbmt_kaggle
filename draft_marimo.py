@@ -11,7 +11,7 @@ def _():
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.base import clone
-    from sklearn.model_selection import train_test_split, StratifiedKFold
+    from sklearn.model_selection import train_test_split, StratifiedKFold, RandomizedSearchCV
     from sklearn.tree import DecisionTreeClassifier
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.metrics import roc_auc_score
@@ -27,6 +27,7 @@ def _():
         GradientBoostingClassifier,
         Path,
         RandomForestClassifier,
+        RandomizedSearchCV,
         SEED,
         StratifiedKFold,
         clone,
@@ -142,7 +143,7 @@ def _(
 
             if hasattr(fold_model, 'feature_importances_'):
                 feature_importances += fold_model.feature_importances_ / cv.n_splits
-    
+
         fi_series: pd.Series = (
             pd.Series(
                 feature_importances, index=adv_X.columns
@@ -195,13 +196,13 @@ def _(mo):
 
 
 @app.cell
-def _(clone, np, pd, plt, roc_auc_score, sns, time):
+def _(RandomizedSearchCV, SEED, clone, np, pd, plt, roc_auc_score, sns, time):
     def _extract_auc_history(model, X_train, y_train, X_val, y_val):
         """
         Извлекает историю ROC AUC по итерациям 
         """
         train_scores, val_scores = [], []
-    
+
         def _find_auc_in_dict(d):
             for metric_name, values in d.items():
                 if 'auc' in metric_name.lower():
@@ -245,7 +246,7 @@ def _(clone, np, pd, plt, roc_auc_score, sns, time):
     def _fit_single_model(model, X_train, y_train, X_val, y_val):
         fitted_model = clone(model)
         model_type = type(fitted_model).__name__.lower()
-    
+
         fit_kwargs = {}
         if any(m in model_type for m in ['catboost', 'lgbm', 'lightgbm', 'xgb', 'xgboost']):
             fit_kwargs['eval_set'] = [(X_train, y_train), (X_val, y_val)]
@@ -295,7 +296,7 @@ def _(clone, np, pd, plt, roc_auc_score, sns, time):
             row, col = divmod(idx, ncols)
             ax = axes[row, col]
             iterations = np.arange(1, len(hist['val_history']) + 1)
-        
+    
             if len(hist['train_history']) > 0:
                 ax.plot(iterations, hist['train_history'], label='Train AUC', color='#5E93CF', linewidth=2)
             ax.plot(iterations, hist['val_history'], label='Val AUC', color='#F80012', linewidth=2)
@@ -342,7 +343,41 @@ def _(clone, np, pd, plt, roc_auc_score, sns, time):
 
         return preds_df, metrics_df
 
-    return (run_model_pipeline,)
+    def run_model_pipeline_search(models_dict, param_grids, X_train, y_train, X_val, y_val, n_iter=10, cv=5, scoring='roc_auc', plot_curves=True):
+        val_predictions = {}
+        metrics_list = []
+        histories = {}
+
+        for name, model in models_dict.items():
+            param_grid = param_grids.get(name, {})
+            search = RandomizedSearchCV(model, param_distributions=param_grid, n_iter=n_iter, cv=cv, scoring=scoring, random_state=SEED)
+            search.fit(X_train, y_train)
+
+            best_model = search.best_estimator_
+            res = _fit_single_model(best_model, X_train, y_train, X_val, y_val)
+
+            val_predictions[name] = res['val_probs']
+            metrics_list.append({
+                'Model': name,
+                'Best Params': search.best_params_,
+                'Train AUC': res['train_auc'],
+                'Val AUC': res['val_auc'],
+                'Fit Time (s)': round(res['fit_time'], 3)
+            })
+            histories[name] = {
+                'train_history': res['train_history'],
+                'val_history': res['val_history']
+            }
+
+        preds_df = pd.DataFrame(val_predictions, index=X_val.index if hasattr(X_val, 'index') else None)
+        metrics_df = pd.DataFrame(metrics_list).sort_values(by='Val AUC', ascending=False).reset_index(drop=True)
+
+        if plot_curves:
+            _plot_learning_curves(histories, ncols=2)
+
+        return preds_df, metrics_df
+
+    return run_model_pipeline, run_model_pipeline_search
 
 
 @app.cell
@@ -357,7 +392,6 @@ def _(
     y_train: "pd.Series",
     y_val: "pd.Series",
 ):
-
     models = {
         'Decision Tree': DecisionTreeClassifier(max_depth=5, random_state=SEED),
         'Random Forest': RandomForestClassifier(n_estimators=100, max_depth=5, random_state=SEED),
@@ -372,12 +406,57 @@ def _(
 
     # Таблица с результатами
     metrics_df
-    return (preds_df,)
+    return models, preds_df
 
 
 @app.cell
 def _(preds_df):
     preds_df
+    return
+
+
+@app.cell
+def _(
+    SEED,
+    StratifiedKFold,
+    X_train: "pd.DataFrame",
+    X_val: "pd.DataFrame",
+    models,
+    run_model_pipeline_search,
+    y_train: "pd.Series",
+    y_val: "pd.Series",
+):
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+    param_grids = {
+        'Decision Tree': {
+            'max_depth': [3, 5, 7, 10, None],
+            'min_samples_leaf': [1, 2, 5, 10, 20],
+        },
+        'Random Forest': {
+            'n_estimators': [100, 200, 300, 500],
+            'max_depth': [3, 5, 7, 10, None],
+            'min_samples_leaf': [1, 2, 5, 10],
+            'max_features': ['sqrt', 'log2', 0.5],
+        },
+        'GBDT': {
+            'n_estimators': [50, 100, 200, 300],
+            'learning_rate': [0.01, 0.03, 0.05, 0.1],
+            'max_depth': [2, 3, 4, 5],
+            'min_samples_leaf': [1, 5, 10, 20],
+        },
+    }
+    preds_df_search, metrics_df_search = run_model_pipeline_search(models, param_grids, X_train, y_train, X_val, y_val, n_iter=10, cv=cv, scoring='roc_auc', plot_curves=True)
+    return (metrics_df_search,)
+
+
+@app.cell
+def _(metrics_df_search):
+    metrics_df_search
+    return
+
+
+@app.cell
+def _():
     return
 
 
