@@ -899,7 +899,70 @@ def _():
 
 
 @app.cell
-def _():
+def _(pd):
+    def aggregate_features(df: pd.DataFrame) -> pd.DataFrame:
+        """Заменяет признаки каждой строки статистиками, сохраняя индекс.
+
+        row_id и target исключаются. total — сумма значений признаков.
+        Пропуски игнорируются; std и var используют ddof=1.
+        """
+        vals = df.drop(columns=['row_id', 'target'], errors='ignore')
+        q1 = vals.quantile(0.25, axis=1)
+        q2 = vals.median(axis=1)
+        q3 = vals.quantile(0.75, axis=1)
+
+        return pd.DataFrame({
+            'mean': vals.mean(axis=1),
+            'median': q2,
+            'std': vals.std(axis=1),
+            'var': vals.var(axis=1),
+            'mad': vals.sub(q2, axis=0).abs().median(axis=1),
+            'min': vals.min(axis=1),
+            '25% (Q1)': q1,
+            '50% (Q2)': q2,
+            '75% (Q3)': q3,
+            'max': vals.max(axis=1),
+            'IQR': q3 - q1,
+            'total': vals.sum(axis=1, min_count=1),
+        }, index=df.index)
+
+    return (aggregate_features,)
+
+
+@app.cell
+def _(
+    aggregate_features,
+    test_df: "pd.DataFrame",
+    train_df: "pd.DataFrame",
+    val_df: "pd.DataFrame",
+):
+    X_train_agg = aggregate_features(train_df)
+    X_val_agg = aggregate_features(val_df)
+    X_test_agg = aggregate_features(test_df)
+    return
+
+
+@app.cell
+def _(aggregate_features, pd):
+    def add_aggregate_features(df: pd.DataFrame) -> pd.DataFrame:
+        """Добавляет статистики к исходным признакам, исключая row_id и target."""
+        vals = df.drop(columns=['row_id', 'target'], errors='ignore')
+        aggregated = aggregate_features(vals)
+        return pd.concat([vals, aggregated], axis=1)
+
+    return (add_aggregate_features,)
+
+
+@app.cell
+def _(
+    add_aggregate_features,
+    test_df: "pd.DataFrame",
+    train_df: "pd.DataFrame",
+    val_df: "pd.DataFrame",
+):
+    X_train_extended = add_aggregate_features(train_df)
+    X_val_extended = add_aggregate_features(val_df)
+    X_test_extended = add_aggregate_features(test_df)
     return
 
 
