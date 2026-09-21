@@ -857,12 +857,12 @@ def _(mo):
 def _(mo):
     # Cell tags: svc_experiment
     mo.md(r"""
-    ## Эксперимент: log1p → StandardScaler → RBF SVC
+    ## Эксперимент: log1p → StandardScaler → веса агрегатов → RBF SVC
 
     Обучение и оценка выполняются на исходных строках без перестановки половин.
     SVC — самостоятельная модель, GBDT здесь не участвует.
 
-    CV ROC-AUC считаем по `decision_function`. Все преобразования обучаются внутри фолдов. Затем калибруем вероятности на train для `predict_proba` и submission; validation в обучении и калибровке не участвует. Сохраняем весь конвейер, поэтому при загрузке передаём признаки с агрегатами **без ручного log1p и масштабирования**.
+    После стандартизации умножаем агрегированные признаки на 2. CV ROC-AUC считаем по `decision_function`. Все преобразования обучаются внутри фолдов. Затем калибруем вероятности на train для `predict_proba` и submission; validation в обучении и калибровке не участвует. Сохраняем весь конвейер, поэтому при загрузке передаём признаки с агрегатами **без ручного log1p, масштабирования и умножения на веса**.
     """)
     return
 
@@ -880,7 +880,24 @@ def _(
     X_val_agg,
     np,
 ):
+    from functools import partial
+
+    aggregate_weight = 2.0
+    n_aggregate_features = X_train_agg.shape[1] - 512
+    if n_aggregate_features < 0:
+        raise ValueError('Ожидалось не менее 512 исходных признаков')
+    feature_weights = np.ones(X_train_agg.shape[1]) * 50
+    feature_weights[512:] = aggregate_weight
+
     svc_pipeline = Pipeline([
+        ('log1p', FunctionTransformer(np.log1p, feature_names_out='one-to-one')),
+        ('scaler', StandardScaler()),
+        ('aggregate_weight', FunctionTransformer(
+            partial(np.multiply, feature_weights), feature_names_out='one-to-one',
+        )),
+        ('svc', SVC(C=10, kernel='rbf', gamma='scale')),
+    ])
+    svc_pipeline_original = Pipeline([
         ('log1p', FunctionTransformer(np.log1p, feature_names_out='one-to-one')),
         ('scaler', StandardScaler()),
         ('svc', SVC(C=10, kernel='rbf', gamma='scale')),
@@ -893,8 +910,8 @@ def _(
         if list(_features.columns) != list(X_train_agg.columns):
             raise ValueError(f'{name}: состав или порядок признаков отличается от train')
 
-    print(f'SVC: {X_train_agg.shape[1]} признаков')
-    return svc_cv, svc_pipeline
+    print(f'SVC: 512 исходных и {n_aggregate_features} агрегированных признаков')
+    return svc_cv, svc_pipeline, svc_pipeline_original
 
 
 @app.cell
@@ -922,11 +939,11 @@ def _(
     cross_val_score,
     np,
     svc_cv,
-    svc_pipeline,
+    svc_pipeline_original,
     y_train: "pd.Series",
 ):
     svc_cv_scores = cross_val_score(
-        svc_pipeline, X_train, y_train,
+        svc_pipeline_original, X_train, y_train,
         cv=svc_cv, scoring='roc_auc', n_jobs=-1,
     )
     print('original features:', X_train.shape[1])
@@ -968,7 +985,7 @@ def _(
         svc_train_probs = svc_model.predict_proba(X_train_eval)[:, 1]
         svc_val_probs = svc_model.predict_proba(X_val)[:, 1]
         svc_metrics = pd.DataFrame([{
-            'Model': 'log1p + StandardScaler + RBF SVC (aggregate features)',
+            'Model': 'log1p + StandardScaler + RBF SVC (weighted aggregate features)',
             'CV AUC (decision_function)': cv_scores.mean(),
             'CV STD': cv_scores.std(),
             'Train AUC': roc_auc_score(y_train_eval, svc_train_probs),
@@ -982,7 +999,7 @@ def _(
             'run_started_at': svc_started_at.isoformat(),
             'feature_columns': list(X_fit.columns),
             'params': pipeline.named_steps['svc'].get_params(),
-            'preprocessing': ['log1p', 'StandardScaler'],
+            'preprocessing': ['log1p', 'StandardScaler', 'aggregate_weight'],
             'calibration': {'method': 'sigmoid', 'ensemble': False, 'folds': calibration_cv.get_n_splits()},
             'seed': seed,
             'cv_scores': cv_scores.tolist(),
