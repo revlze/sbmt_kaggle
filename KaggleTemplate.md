@@ -1,5 +1,5 @@
 ### To-do
-- pass
+- Чет там с генерацией датасета
 
 ### Notes
 - ~10% объектов в train, val и public с ошибочными метками
@@ -16,7 +16,7 @@
 
 | Approach | CV  | CV STD | LB  | Date |
 | -------- | --- | ------ | --- | ---- |
-|          |     |        |     |      |
+| aggregate_features + log1p + StandardScaler + SVC(C=10, kernel='rbf')  |   0.94689  |   ...   |   0.93654  |   Sun Sep 20 2026 11:50:15 |
 
 ### Annotations
 
@@ -32,7 +32,9 @@
 
 ### Processed ideas
 #### Good
-- pass
+- SVC
+- aggregating fetures
+
 #### Neutral
 - pass
 #### Bad
