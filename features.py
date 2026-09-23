@@ -364,29 +364,95 @@ def _(X_train: "pd.DataFrame", np, pd, sns, y_train: "pd.Series"):
     sns.set_style("darkgrid")
     palette = {0: '#5E93CF', 1: '#F80012'}
 
-    # 1. Генерируем новые признаки (агрегации по строкам)
+    # ============================================================
+    # Генерируем новые признаки
+    # ============================================================
     X_eng = pd.DataFrame(index=X_train.index)
 
-    # X_eng['row_sum'] = X_train.sum(axis=1)   хуже лог-суммы                           # Аналог L1-расстояния (Манхэттенское)
-    # X_eng['row_l2'] = np.sqrt((X_train ** 2).sum(axis=1))  хуже лог-суммы             # Аналог L2-расстояния (Евклидово)
-    # X_eng['row_std'] = X_train.std(axis=1)          хуже PCA                    # Разброс значений внутри вектора
-    X_eng['row_max'] = X_train.max(axis=1)                                # Максимальный "выброс" в различиях
-    X_eng['row_zeros'] = (X_train == 0).sum(axis=1)                       # Количество точных совпадений (нулей)
-    X_eng['row_log1p_sum'] = np.log1p(X_train).sum(axis=1)                # Сумма с подавлением тяжелых хвостов
+    # ------------------------------------------------------------
+    # Старые агрегаты
+    # ------------------------------------------------------------
+    X_eng['row_max'] = X_train.max(axis=1)
+    X_eng['row_zeros'] = (X_train == 0).sum(axis=1)
+    X_eng['row_log1p_sum'] = np.log1p(X_train).sum(axis=1)
     X_eng['row_q95'] = np.quantile(X_train, 0.95, axis=1)
     X_eng['row_near_zero_05'] = (X_train < 0.5).sum(axis=1)
-    # X_eng['row_pca1'] = X_pca_1.flatten()            хуже лог-суммы             # Первая главная компонента (PCA)
 
-    # Считаем корреляцию новых признаков с таргетом
-    eng_corr = X_eng.corrwith(y_train, method='spearman').sort_values(key=abs, ascending=False)
-    print("Корреляция новых признаков с таргетом:\n", eng_corr)
+    # ------------------------------------------------------------
+    # Log1p-вектор
+    # ------------------------------------------------------------
+    Z = np.log1p(X_train.to_numpy())
+
+    # X_eng['log1p_mean'] = Z.mean(axis=1)
+    # X_eng['log1p_std'] = Z.std(axis=1)
+    # X_eng['log1p_max'] = Z.max(axis=1)
+
+    # L1 / L2 нормы
+    X_eng['log1p_l1'] = np.abs(Z).sum(axis=1)
+    # X_eng['log1p_l2'] = np.linalg.norm(Z, axis=1)
+
+    # ------------------------------------------------------------
+    # Центрированный log1p-вектор
+    # ------------------------------------------------------------
+    # Z_centered = Z - Z.mean(axis=1, keepdims=True)
+
+    # X_eng['centered_l1'] = np.abs(Z_centered).sum(axis=1)
+    # X_eng['centered_l2'] = np.linalg.norm(Z_centered, axis=1)
+    # X_eng['centered_max_abs'] = np.abs(Z_centered).max(axis=1)
+
+    # ------------------------------------------------------------
+    # Распределение энергии по координатам
+    # ------------------------------------------------------------
+    z_sum = Z.sum(axis=1)
+    P = Z / np.maximum(z_sum[:, None], 1e-12)
+
+    # Энтропия
+    # entropy = -(P * np.log(np.maximum(P, 1e-12))).sum(axis=1)
+
+    # X_eng['entropy'] = entropy
+    # X_eng['effective_dimension'] = np.exp(entropy)
+
+    # Концентрация энергии
+    # X_eng['concentration'] = (P ** 2).sum(axis=1)
+
+    # ------------------------------------------------------------
+    # Сколько энергии находится в крупнейших координатах
+    # ------------------------------------------------------------
+    # P_sorted = np.sort(P, axis=1)[:, ::-1]
+
+    # for k in [1, 5, 10, 20, 50]:
+    #     X_eng[f'top_{k}_mass'] = P_sorted[:, :k].sum(axis=1)
+
+    # ------------------------------------------------------------
+    # Количество малых значений в log1p-пространстве
+    # ------------------------------------------------------------
+    for threshold in [0.5, 0.7, 1.0]:
+        X_eng[f'log1p_below_{threshold}'] = (Z < threshold).sum(axis=1)
+
+    # ------------------------------------------------------------
+    # PCA — оставляем для сравнения
+    # ------------------------------------------------------------
+    # X_eng['row_pca1'] = X_pca_1.flatten()
+
+
+    # ============================================================
+    # Корреляции
+    # ============================================================
+    eng_corr = (
+        X_eng
+        .corrwith(y_train, method='spearman')
+        .sort_values(key=abs, ascending=False)
+    )
+
+    print("Корреляция новых признаков с таргетом:\n")
+    print(eng_corr)
     return PCA, X_eng, palette
 
 
 @app.cell
 def _(X_eng, palette, plt, sns, y_train: "pd.Series"):
     # 2. Визуализация распределений по классам
-    fig, axes = plt.subplots(3, 3, figsize=(16, 10))
+    fig, axes = plt.subplots(3, 3, figsize=(16, 12))
     axes = axes.flatten()
 
     for i, col_ in enumerate(X_eng.columns):
@@ -422,7 +488,7 @@ def _(X_eng, palette, plt, sns, y_train: "pd.Series"):
 
 
     # Создаем сетку 5x3
-    fig_3, axes_3 = plt.subplots(5, 3, figsize=(13, 18))
+    fig_3, axes_3 = plt.subplots(12, 3, figsize=(13, 20))
     axes_3 = axes_3.flatten()
 
     for i_, (x_col, y_col) in enumerate(feature_pairs):
@@ -444,6 +510,99 @@ def _(X_eng, palette, plt, sns, y_train: "pd.Series"):
 
     plt.tight_layout()
     plt.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+ 
+    """)
+    return
+
+
+@app.cell
+def _(X_train: "pd.DataFrame", np, pd, y_train: "pd.Series"):
+    from scipy.stats import spearmanr
+    from sklearn.covariance import LedoitWolf
+    from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.neighbors import NearestNeighbors
+
+
+    def generate_geometric_features_oof(X, y, n_splits=5):
+      skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+      # Инициализация матриц для новых фичей
+      n_samples = X.shape[0]
+      feat_dict = {
+          'd_euclid_0': np.zeros(n_samples),
+          'd_euclid_1': np.zeros(n_samples),
+          'd_euclid_diff': np.zeros(n_samples),
+          'proj_w': np.zeros(n_samples),
+          'cos_w': np.zeros(n_samples),
+          'd_mahal_0': np.zeros(n_samples),
+          'd_mahal_1': np.zeros(n_samples),
+          'd_mahal_diff': np.zeros(n_samples),
+      }
+
+      for train_idx, val_idx in skf.split(X, y):
+        X_tr, y_tr = X[train_idx], y[train_idx]
+        X_va = X[val_idx]
+
+        # 1. Центроиды по фолду
+        mu0 = X_tr[y_tr == 0].mean(axis=0)
+        mu1 = X_tr[y_tr == 1].mean(axis=0)
+
+        # Вектор разделения
+        w = mu1 - mu0
+        w_norm = np.linalg.norm(w)
+
+        # 2. Евклидовы расстояния и проекции
+        d0 = np.linalg.norm(X_va - mu0, axis=1)
+        d1 = np.linalg.norm(X_va - mu1, axis=1)
+
+        feat_dict['d_euclid_0'][val_idx] = d0
+        feat_dict['d_euclid_1'][val_idx] = d1
+        feat_dict['d_euclid_diff'][val_idx] = d0 - d1
+        feat_dict['proj_w'][val_idx] = X_va @ w
+
+        if w_norm > 0:
+          x_norms = np.linalg.norm(X_va, axis=1)
+          x_norms[x_norms == 0] = 1e-8
+          feat_dict['cos_w'][val_idx] = (X_va @ w) / (x_norms * w_norm)
+
+        # 3. Расстояние Махаланобиса с LedoitWolf
+        cov0 = LedoitWolf().fit(X_tr[y_tr == 0])
+        cov1 = LedoitWolf().fit(X_tr[y_tr == 1])
+
+        dm0 = np.sqrt(cov0.mahalanobis(X_va))
+        dm1 = np.sqrt(cov1.mahalanobis(X_va))
+
+        feat_dict['d_mahal_0'][val_idx] = dm0
+        feat_dict['d_mahal_1'][val_idx] = dm1
+        feat_dict['d_mahal_diff'][val_idx] = dm0 - dm1
+
+      return pd.DataFrame(feat_dict)
+
+
+    # --- ПРИМЕНЕНИЕ ---
+    # 1. Трансформируем данные (log1p + StandardScaler)
+    X_trans = np.log1p(X_train)
+
+    # 2. Генерируем OOF геометрию
+    df_geom = generate_geometric_features_oof(X_trans.values, y_train.values)
+
+    # 3. Проверяем корреляцию Спирмена
+    print("--- Spearman Correlation with Target ---")
+    for col in df_geom.columns:
+      corr, _ = spearmanr(df_geom[col], y_train)
+      print(f'{col:15s}: {corr:.4f}')
+    return
+
+
+@app.cell
+def _():
     return
 
 
@@ -549,7 +708,7 @@ def _():
 
     def evaluate_lgbm(X_tr, y_tr, X_valid, y_valid, base_model, exp_name="Experiment"):
         model = clone(base_model)
-    
+
         model.fit(
             X_tr,
             y_tr,
@@ -569,7 +728,7 @@ def _():
         print(f"Train ROC-AUC:      {train_auc:.5f}")
         print(f"Validation ROC-AUC: {val_auc:.5f}")
         print(f"Overfit (Train-Val):{train_auc - val_auc:.5f}\n")
-    
+
         return val_auc, model
 
     # Базовая конфигурация LightGBM
@@ -939,7 +1098,7 @@ def _(
     X_train_agg = aggregate_features(train_df)
     X_val_agg = aggregate_features(val_df)
     X_test_agg = aggregate_features(test_df)
-    return
+    return (X_val_agg,)
 
 
 @app.cell
