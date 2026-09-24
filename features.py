@@ -516,88 +516,195 @@ def _(X_eng, palette, plt, sns, y_train: "pd.Series"):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
- 
+    ## Еще крутые фичи
     """)
     return
 
 
 @app.cell
-def _(X_train: "pd.DataFrame", np, pd, y_train: "pd.Series"):
+def _(
+    PCA,
+    X_train: "pd.DataFrame",
+    np,
+    pd,
+    roc_auc_score,
+    y_train: "pd.Series",
+):
     from scipy.stats import spearmanr
     from sklearn.covariance import LedoitWolf
-    from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.discriminant_analysis import (
+        LinearDiscriminantAnalysis,
+        QuadraticDiscriminantAnalysis,
+    )
     from sklearn.model_selection import StratifiedKFold
     from sklearn.neighbors import NearestNeighbors
 
 
-    def generate_geometric_features_oof(X, y, n_splits=5):
-      skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    def generate_full_geometry_oof(X, y, n_splits=5, seed=42):
+        """Генерация OOF геометрических и топологических признаков.
 
-      # Инициализация матриц для новых фичей
-      n_samples = X.shape[0]
-      feat_dict = {
-          'd_euclid_0': np.zeros(n_samples),
-          'd_euclid_1': np.zeros(n_samples),
-          'd_euclid_diff': np.zeros(n_samples),
-          'proj_w': np.zeros(n_samples),
-          'cos_w': np.zeros(n_samples),
-          'd_mahal_0': np.zeros(n_samples),
-          'd_mahal_1': np.zeros(n_samples),
-          'd_mahal_diff': np.zeros(n_samples),
-      }
+        X: numpy array (уже после log1p/преобразований)
+        y: numpy array или pandas Series
+        """
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        n_samples = X.shape[0]
 
-      for train_idx, val_idx in skf.split(X, y):
-        X_tr, y_tr = X[train_idx], y[train_idx]
-        X_va = X[val_idx]
+        # Словарь для хранения всех новых признаков
+        feats = {
+            # 1. Базовая евклидова геометрия
+            'd_euclid_0': np.zeros(n_samples),
+            'd_euclid_1': np.zeros(n_samples),
+            'd_euclid_diff': np.zeros(n_samples),
+            'cos_w': np.zeros(n_samples),
+            # 2. LDA / QDA геометрия (Дискриминантные функции)
+            'lda_score': np.zeros(n_samples),
+            'qda_score': np.zeros(n_samples),
+            # 3. QDA Mahalanobis (Class-specific LedoitWolf)
+            'd_mahal_0': np.zeros(n_samples),
+            'd_mahal_1': np.zeros(n_samples),
+            'd_mahal_diff': np.zeros(n_samples),
+            # 4. Расстояния до подпространств классов (PCA Subspace Reconstruction Error)
+            'pca_subspace_dist_0': np.zeros(n_samples),
+            'pca_subspace_dist_1': np.zeros(n_samples),
+            'pca_subspace_diff': np.zeros(n_samples),
+            # 5. Локальная топология (KNN)
+            'knn_dist_0_k15': np.zeros(n_samples),
+            'knn_dist_1_k15': np.zeros(n_samples),
+            'knn_dist_diff_k15': np.zeros(n_samples),
+            'knn_prob_class1_k15': np.zeros(n_samples),
+        }
 
-        # 1. Центроиды по фолду
-        mu0 = X_tr[y_tr == 0].mean(axis=0)
-        mu1 = X_tr[y_tr == 1].mean(axis=0)
+        print('Старт OOF генерации геометрии...')
 
-        # Вектор разделения
-        w = mu1 - mu0
-        w_norm = np.linalg.norm(w)
+        for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+            X_tr, y_tr = X[train_idx], y[train_idx]
+            X_va = X[val_idx]
 
-        # 2. Евклидовы расстояния и проекции
-        d0 = np.linalg.norm(X_va - mu0, axis=1)
-        d1 = np.linalg.norm(X_va - mu1, axis=1)
+            # Разделение трейна по классам
+            X_tr0, X_tr1 = X_tr[y_tr == 0], X_tr[y_tr == 1]
 
-        feat_dict['d_euclid_0'][val_idx] = d0
-        feat_dict['d_euclid_1'][val_idx] = d1
-        feat_dict['d_euclid_diff'][val_idx] = d0 - d1
-        feat_dict['proj_w'][val_idx] = X_va @ w
+            # ----------------------------------------------------------------------
+            # 1. Центроиды и Евклидова геометрия
+            # ----------------------------------------------------------------------
+            mu0 = X_tr0.mean(axis=0)
+            mu1 = X_tr1.mean(axis=0)
+            w = mu1 - mu0
+            w_norm = np.linalg.norm(w)
 
-        if w_norm > 0:
-          x_norms = np.linalg.norm(X_va, axis=1)
-          x_norms[x_norms == 0] = 1e-8
-          feat_dict['cos_w'][val_idx] = (X_va @ w) / (x_norms * w_norm)
+            d0 = np.linalg.norm(X_va - mu0, axis=1)
+            d1 = np.linalg.norm(X_va - mu1, axis=1)
+            feats['d_euclid_0'][val_idx] = d0
+            feats['d_euclid_1'][val_idx] = d1
+            feats['d_euclid_diff'][val_idx] = d0 - d1
 
-        # 3. Расстояние Махаланобиса с LedoitWolf
-        cov0 = LedoitWolf().fit(X_tr[y_tr == 0])
-        cov1 = LedoitWolf().fit(X_tr[y_tr == 1])
+            if w_norm > 0:
+                x_norms = np.linalg.norm(X_va, axis=1)
+                x_norms[x_norms == 0] = 1e-8
+                feats['cos_w'][val_idx] = (X_va @ w) / (x_norms * w_norm)
 
-        dm0 = np.sqrt(cov0.mahalanobis(X_va))
-        dm1 = np.sqrt(cov1.mahalanobis(X_va))
+            # ----------------------------------------------------------------------
+            # 2. LDA Score (Shrinkage LDA)
+            # ----------------------------------------------------------------------
+            lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')
+            lda.fit(X_tr, y_tr)
+            feats['lda_score'][val_idx] = lda.decision_function(X_va)
 
-        feat_dict['d_mahal_0'][val_idx] = dm0
-        feat_dict['d_mahal_1'][val_idx] = dm1
-        feat_dict['d_mahal_diff'][val_idx] = dm0 - dm1
+            # ----------------------------------------------------------------------
+            # 3. QDA Score & Mahalanobis Distances (LedoitWolf)
+            # ----------------------------------------------------------------------
+            qda = QuadraticDiscriminantAnalysis(reg_param=0.05)
+            qda.fit(X_tr, y_tr)
+            feats['qda_score'][val_idx] = qda.decision_function(X_va)
 
-      return pd.DataFrame(feat_dict)
+            cov0 = LedoitWolf().fit(X_tr0)
+            cov1 = LedoitWolf().fit(X_tr1)
+
+            dm0 = np.sqrt(cov0.mahalanobis(X_va))
+            dm1 = np.sqrt(cov1.mahalanobis(X_va))
+            feats['d_mahal_0'][val_idx] = dm0
+            feats['d_mahal_1'][val_idx] = dm1
+            feats['d_mahal_diff'][val_idx] = dm0 - dm1
+
+            # ----------------------------------------------------------------------
+            # 4. PCA Subspace Distances (Расстояние до главных многообразий классов)
+            # Берём 15 главных компонент для каждого класса
+            # ----------------------------------------------------------------------
+            n_comp = min(15, X_tr0.shape[0] - 1, X_tr1.shape[0] - 1)
+            pca0 = PCA(n_components=n_comp, random_state=seed).fit(X_tr0)
+            pca1 = PCA(n_components=n_comp, random_state=seed).fit(X_tr1)
+
+            # Ошибка реконструкции (квадрат расстояния до ортогональной проекции)
+            rec0 = pca0.inverse_transform(pca0.transform(X_va))
+            rec1 = pca1.inverse_transform(pca1.transform(X_va))
+
+            pca_d0 = np.linalg.norm(X_va - rec0, axis=1)
+            pca_d1 = np.linalg.norm(X_va - rec1, axis=1)
+
+            feats['pca_subspace_dist_0'][val_idx] = pca_d0
+            feats['pca_subspace_dist_1'][val_idx] = pca_d1
+            # Чем объект дальше от подпространства класса 0 и ближе к подпространству класса 1, тем больше diff
+            feats['pca_subspace_diff'][val_idx] = pca_d0 - pca_d1
+
+            # ----------------------------------------------------------------------
+            # 5. KNN Локальная Топология (K = 15)
+            # ----------------------------------------------------------------------
+            k_neighbors = 15
+            nn0 = NearestNeighbors(n_neighbors=k_neighbors, n_jobs=-1).fit(X_tr0)
+            nn1 = NearestNeighbors(n_neighbors=k_neighbors, n_jobs=-1).fit(X_tr1)
+
+            knn_d0 = nn0.kneighbors(X_va)[0].mean(axis=1)
+            knn_d1 = nn1.kneighbors(X_va)[0].mean(axis=1)
+
+            feats['knn_dist_0_k15'][val_idx] = knn_d0
+            feats['knn_dist_1_k15'][val_idx] = knn_d1
+            feats['knn_dist_diff_k15'][val_idx] = knn_d0 - knn_d1
+
+            # Общий KNN для доли классов
+            nn_all = NearestNeighbors(
+                n_neighbors=k_neighbors + 1, n_jobs=-1
+            ).fit(X_tr)
+            indices = nn_all.kneighbors(X_va, return_distance=False)
+            # Доля соседей класса 1 в локальной окрестности
+            feats['knn_prob_class1_k15'][val_idx] = np.mean(y_tr[indices] == 1, axis=1)
+
+        return pd.DataFrame(feats)
 
 
-    # --- ПРИМЕНЕНИЕ ---
-    # 1. Трансформируем данные (log1p + StandardScaler)
-    X_trans = np.log1p(X_train)
+    # ==============================================================================
+    # ЗАПУСК И СРАВНЕНИЕ МЕТРИК
+    # ==============================================================================
 
-    # 2. Генерируем OOF геометрию
-    df_geom = generate_geometric_features_oof(X_trans.values, y_train.values)
+    # 1. Подготовка данных (log1p)
+    X_trans = np.log1p(X_train).values if isinstance(X_train, pd.DataFrame) else np.log1p(X_train)
+    y_true = y_train.values if isinstance(y_train, pd.Series) else y_train
 
-    # 3. Проверяем корреляцию Спирмена
-    print("--- Spearman Correlation with Target ---")
-    for col in df_geom.columns:
-      corr, _ = spearmanr(df_geom[col], y_train)
-      print(f'{col:15s}: {corr:.4f}')
+    # 2. Генерация OOF признаков
+    df_all_geom = generate_full_geometry_oof(X_trans, y_true, n_splits=5)
+
+    # 3. Расчет Spearman Correlation и ROC-AUC
+    results = []
+    for col in df_all_geom.columns:
+        corr, _ = spearmanr(df_all_geom[col], y_true)
+        auc = roc_auc_score(y_true, df_all_geom[col])
+        # Если признак инвертирован (например, расстояние до 1 класса меньше), приводим AUC к > 0.5 для честного сравнения
+        auc_max = max(auc, 1 - auc)
+        results.append({
+            'Feature': col,
+            'Spearman Corr': corr,
+            'ROC-AUC': auc,
+            'Max ROC-AUC': auc_max
+        })
+
+    res_df = pd.DataFrame(results).sort_values(by='Max ROC-AUC', ascending=False)
+
+    print("\n" + "="*70)
+    print(" РЕЗУЛЬТАТЫ СРАВНЕНИЯ ГЕОМЕТРИЧЕСКИХ ПРИЗНАКОВ (OOF)")
+    print("="*70)
+    print(res_df.to_string(index=False, formatters={
+        'Spearman Corr': '{:+.4f}'.format,
+        'ROC-AUC': '{:.4f}'.format,
+        'Max ROC-AUC': '{:.4f}'.format
+    }))
     return
 
 
@@ -741,7 +848,7 @@ def _():
         verbosity=-1,
         random_state=42
     )
-    return base_model, evaluate_lgbm
+    return base_model, evaluate_lgbm, roc_auc_score
 
 
 @app.cell
