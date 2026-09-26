@@ -9,3 +9,8 @@ __pycache__
 *.csv
 logs/
 analysis/
+.svc_multikernel_cache/
+.svc_multikernel_cache_v2/
+.svc_feature_quality_cache_v1/
+.svc_clean_derived_cache_v1/
+.svc_final_rescue_cache_v1/
