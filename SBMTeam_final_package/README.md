@@ -17,13 +17,17 @@ SVC model design, ensembling, experiment review and final submission selection.
 - **Second reproduced candidate:** `submission_rescue_corrected_best.csv`
 
 Run `final_submission_notebook.ipynb` with **Restart and Run All**. It trains both
-models from the supplied competition CSV files and regenerates all three output
-files. No internet, cached folds, fitted models or hidden local files are used.
+final models plus eight representative comparison baselines from the supplied
+competition CSV files and regenerates all three output files. No internet,
+cached folds, fitted models or hidden local files are used.
 
 ## Experiment summary
 
-The executable notebook prints the final measured table. The frozen selection
-metrics from the original leakage-safe 25-fold experiment were:
+The executable notebook prints a measured ten-model comparison table containing
+classic trees and boosting trained on the same leakage-safe engineered feature
+blocks, a deliberately plain raw-only SVC baseline, engineered single SVC models,
+and both final ensembles. The frozen selection metrics from the original leakage-safe 25-fold
+experiment were:
 
 | Model | Feature set | CV ROC-AUC | Validation ROC-AUC | Seed |
 |---|---|---:|---:|---:|
@@ -38,6 +42,7 @@ notebook enforces the 15-minute total-runtime requirement.
 
 - `final_submission_notebook.ipynb` — executable entry point.
 - `final_model_runner.py` — frozen training, prediction and audit pipeline.
+- `EXPERIMENTS.md` — concise history of the attempted model families and features.
 - `svc_experiments.py` — supervised feature transformers.
 - `svc_multikernel_experiments.py` — feature-block construction utilities.
 - `svc_final_rescue_experiments.py` — whitening and additive-kernel utilities.
