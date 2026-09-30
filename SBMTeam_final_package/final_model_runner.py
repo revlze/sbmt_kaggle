@@ -434,12 +434,28 @@ def run(output_dir="."):
         "s100_fit_predict_seconds": s100_seconds,
         "total_seconds": total_seconds,
     }
+    output_paths = [new5_path, rescue_path, final_path]
+    submissions = (new5_submission, rescue_submission)
+    row_id_exact = all(
+        np.array_equal(frame["row_id"].to_numpy(), test_df["row_id"].to_numpy())
+        for frame in submissions
+    )
+    probabilities_valid = all(
+        np.isfinite(frame["target"].to_numpy()).all()
+        and frame["target"].between(0.0, 1.0).all()
+        for frame in submissions
+    )
     assert total_seconds < 15 * 60, f"runtime limit exceeded: {total_seconds:.1f}s"
     return {
         "experiment_table": experiment_table,
         "versions": versions,
         "timings": timings,
-        "paths": [new5_path, rescue_path, final_path],
+        # Keep the original key for the CLI and expose the explicit name used
+        # by the notebook. Both intentionally point to the same three files.
+        "paths": output_paths,
+        "output_paths": output_paths,
+        "row_id_exact": row_id_exact,
+        "probabilities_valid": probabilities_valid,
         "new5_submission": new5_submission,
         "rescue_submission": rescue_submission,
     }
