@@ -79,63 +79,140 @@ TREE_FEATURE_REPRESENTATIONS = (
 MODEL_CONFIGURATIONS = [
     {
         "model": "Дерево решений",
-        "role": "Простой интерпретируемый baseline: показывает, сколько структуры можно извлечь одним регуляризованным деревом без ансамблирования.",
+        "role": (
+            "Первая простая модель. Показывает, насколько задача решается "
+            "одним неглубоким деревом на полном наборе исходных и построенных признаков, "
+            "без ансамблирования."
+        ),
         "parameters": "max_depth=5, min_samples_leaf=20",
-        "feature_set": "raw + leakage-safe whitened geometry, density, aggregates, coord, kNN и PCA128",
+        "feature_set": (
+            "512 исходных признаков + geometry, density, aggregates, coord, kNN "
+            "и PCA128; для части engineered-блоков используются PCA-whitened представления"
+        ),
     },
     {
         "model": "Случайный лес",
-        "role": "Bagging-baseline для нелинейных разбиений; снижает дисперсию одиночного дерева и проверяет взаимодействия engineered-признаков.",
-        "parameters": "n_estimators=1000, max_depth=8, min_samples_leaf=40, min_samples_split=80, max_features=sqrt",
-        "feature_set": "raw + leakage-safe whitened geometry, density, aggregates, coord, kNN и PCA128",
+        "role": (
+            "Ансамбль независимых деревьев на том же расширенном наборе признаков. "
+            "Проверяет, насколько усреднение большого числа деревьев улучшает результат "
+            "по сравнению с одиночным деревом."
+        ),
+        "parameters": (
+            "n_estimators=1000, max_depth=8, min_samples_leaf=40, "
+            "min_samples_split=80, max_features=sqrt"
+        ),
+        "feature_set": (
+            "512 исходных признаков + geometry, density, aggregates, coord, kNN "
+            "и PCA128"
+        ),
     },
     {
         "model": "Градиентный бустинг (GBDT)",
-        "role": "Последовательный ансамбль неглубоких деревьев; служит сильным контрастом kernel-методу на том же расширенном наборе признаков.",
-        "parameters": "n_estimators=2000, learning_rate=0.01, max_depth=3, min_samples_leaf=80, subsample=0.7",
-        "feature_set": "raw + leakage-safe whitened geometry, density, aggregates, coord, kNN и PCA128",
+        "role": (
+            "Последовательный ансамбль неглубоких деревьев. Использует тот же набор "
+            "признаков, что и другие древесные модели, и служит альтернативой "
+            "RBF-SVC с другим способом моделирования нелинейных зависимостей."
+        ),
+        "parameters": (
+            "n_estimators=2000, learning_rate=0.01, max_depth=3, "
+            "min_samples_leaf=80, subsample=0.7"
+        ),
+        "feature_set": (
+            "512 исходных признаков + geometry, density, aggregates, coord, kNN "
+            "и PCA128"
+        ),
     },
     {
         "model": "Простой raw RBF SVC",
-        "role": "Контрольная SVC без engineered-блоков: отделяет эффект самого RBF-классификатора от эффекта разработанных представлений.",
-        "parameters": "log1p, StandardScaler, C=10, gamma=scale",
+        "role": (
+            "SVC без дополнительных engineered-признаков. Нужна, чтобы "
+            "отдельно оценить качество самого RBF-классификатора и затем сравнить его "
+            "с multi-kernel моделями."
+        ),
+        "parameters": "log1p → StandardScaler; RBF SVC, C=10, gamma=scale",
         "feature_set": "только 512 исходных признаков",
     },
     {
         "model": "Fine6 SVC",
-        "role": "Исторический multi-kernel anchor, с которым сравнивались последующие исправления представлений и prediction blending.",
-        "parameters": "C=6; additive weights raw=.68, geometry=.10, density=.10, aggregates=.05, knn=.05, coord=.02",
-        "feature_set": "исходный raw и original engineered-блоки",
+        "role": (
+            "Multi-kernel SVC. Для разных групп признаков строятся "
+            "отдельные RBF-ядра, после чего они складываются с фиксированными весами. "
+            "Основной вклад даёт raw-блок, а engineered-блоки дополняют его."
+        ),
+        "parameters": (
+            "C=6; веса ядер: raw=.68, geometry=.10, density=.10, "
+            "aggregates=.05, kNN=.05, coord=.02"
+        ),
+        "feature_set": (
+            "log1p(raw) + исходные geometry, density, aggregates, coord и kNN-блоки"
+        ),
     },
     {
         "model": "Corrected K0 SVC",
-        "role": "Одиночная основная SVC после исправления whitening-представлений и gamma; показывает качество engineered-модели без блендинга.",
-        "parameters": "C=3; Fine6 weights with corrected frozen block gammas",
-        "feature_set": "raw + whitened geometry/density/aggregates/coord + kNN",
+        "role": (
+            "Улучшенная версия Fine6. Общая multi-kernel структура и веса блоков "
+            "сохраняются, но geometry, density, aggregates и coord заменены на "
+            "PCA-whitened представления, а параметры RBF-ядер зафиксированы."
+        ),
+        "parameters": (
+            "C=3; веса: raw=.68, geometry=.10, density=.10, "
+            "aggregates=.05, kNN=.05, coord=.02"
+        ),
+        "feature_set": (
+            "log1p(raw) + geometry_white16 + density_white5 + "
+            "aggregates_white4 + coord_white4 + kNN"
+        ),
     },
     {
         "model": "S100 SVC",
-        "role": "Главная одиночная SVC финального решения: использует sqrt-метрику raw и исправленные engineered-блоки, но ещё без auxiliary blend.",
-        "parameters": "C=3; sqrt_raw=.68, geometry=.10, density=.10, aggregates=.05, knn=.05, coord=.02",
-        "feature_set": "sqrt(raw) + исправленные engineered-блоки",
+        "role": (
+            "Вариант K0 с другим представлением исходных 512 признаков. "
+            "В основном raw-ядре вместо log1p используется sqrt-преобразование; "
+            "остальные engineered-блоки остаются такими же, как в corrected K0."
+        ),
+        "parameters": (
+            "C=3; веса: sqrt_raw=.68, geometry=.10, density=.10, "
+            "aggregates=.05, kNN=.05, coord=.02"
+        ),
+        "feature_set": (
+            "sqrt(raw) + geometry_white16 + density_white5 + "
+            "aggregates_white4 + coord_white4 + kNN"
+        ),
     },
     {
         "model": "Вспомогательный clean_aux SVC",
-        "role": "Специально отличающаяся дополнительная модель: слабее основной отдельно, но даёт полезный complementary ranking для ансамбля.",
-        "parameters": "C=30; pca128=.75, aggregates_white4=.25",
-        "feature_set": "PCA128 + whitened aggregates",
+        "role": (
+            "SVC с ослабленными признаками. "
+            "Отдельно она слабее основной модели, но её ранжирование отличается "
+            "от Fine6/K0/S100, поэтому модель используется как дополнительный "
+            "компонент финальных ансамблей для регуляризации."
+        ),
+        "parameters": "C=30; веса ядер: PCA128=.75, aggregates_white4=.25",
+        "feature_set": "PCA128 + aggregates_white4",
     },
     {
         "model": "Rescue T6",
-        "role": "Вторая финальная модель: консервативный rank-blend исторического Fine6, corrected K0 и complementary auxiliary SVC.",
-        "parameters": "rank blend: Fine6=.40, corrected K0=.40, clean_aux=.20",
-        "feature_set": "три разных SVC-представления",
+        "role": (
+            "Второй финальный ансамбль. Объединяет старую Fine6, "
+            "улучшенную corrected K0 и clean_aux модель. "
+            "Смешиваются не исходные SVC-score, а их ранги."
+        ),
+        "parameters": (
+            "rank blend: Fine6=.40, corrected K0=.40, clean_aux=.20"
+        ),
+        "feature_set": (
+            "ранги предсказаний Fine6 SVC, corrected K0 SVC и clean_aux SVC"
+        ),
     },
     {
         "model": "NEW5 (финальная)",
-        "role": "Основная designated-модель: сочетает сильную sqrt-raw S100 и отличающийся PCA128 auxiliary ranking.",
+        "role": (
+            "Финальный ансамбль с sqrt-представлением raw-признаков. "
+            "Основную часть прогноза даёт S100, а clean_aux добавляет независимый "
+            "PCA/aggregate-сигнал."
+        ),
         "parameters": "rank blend: S100=.80, clean_aux=.20",
-        "feature_set": "sqrt/engineered SVC + PCA128 auxiliary SVC",
+        "feature_set": "ранги предсказаний S100 SVC и clean_aux SVC",
     },
 ]
 
